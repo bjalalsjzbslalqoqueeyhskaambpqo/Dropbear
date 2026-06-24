@@ -1,16 +1,16 @@
-name: Compilar Dropbear al Mínimo para Android
+name: Compilación Inteligente Dropbear (Android y Debian 11)
 
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Permite ejecutar la compilación manualmente desde la web de GitHub
+  workflow_dispatch: # Botón para ejecutar manualmente desde la web
 
 jobs:
+  # TRABAJO 1: COMPILACIÓN PARA ANDROID (CROSS-COMPILATION)
   build-android:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Compilación paralela para 32-bit (armv7a) y 64-bit (aarch64)
         include:
           - arch: "armeabi-v7a"
             target: "armv7a-linux-androideabi"
@@ -18,24 +18,23 @@ jobs:
           - arch: "arm64-v8a"
             target: "aarch64-linux-android"
             api: "21"
-
     steps:
-    - name: Descargar Código Oficial de Dropbear SSH
+    - name: Descargar Código Oficial de Dropbear
       uses: actions/checkout@v4
       with:
         repository: 'mkj/dropbear'
+        ref: 'master'
         fetch-depth: 1
 
     - name: Configurar Android NDK
       uses: nttld/setup-ndk@v1
       id: setup-ndk
       with:
-        ndk-version: r27c # Versión LTS robusta con soporte para toolchains modernas
+        ndk-version: r27c
 
     - name: Inyectar Configuración Ultra-Ligera (localoptions.h)
       run: |
         cat << 'EOF' > localoptions.h
-        /* Desactivar funciones no deseadas para ahorrar tamaño y RAM */
         #define DROPBEAR_SMALL_CODE 1
         #define DROPBEAR_BLOWFISH 0
         #define DROPBEAR_TWOFISH128 0
@@ -44,59 +43,87 @@ jobs:
         #define DROPBEAR_AES256 0
         #define DROPBEAR_X11FWD 0
         #define DROPBEAR_SFTPSERVER 0
-        
-        /* Mantener únicamente los algoritmos acelerados por hardware / más rápidos */
         #define DROPBEAR_AES128 1
         #define DROPBEAR_CHACHA20POLY1305 1
         #define DROPBEAR_CURVE25519 1
-        
-        /* Habilitar reenvío de puertos para el proxy SOCKS5 (-D) */
         #define DROPBEAR_CLI_LOCALPORTFWD 1
         #define DROPBEAR_SVR_LOCALPORTFWD 1
         EOF
 
-    - name: Compilar Dropbear Multi-Binario
+    - name: Ejecutar Compilación Cruzada Android
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
-        # Configurar las rutas del Toolchain del NDK de Android
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-        export TARGET_HOST=${{ matrix.target }}
-        export API_LEVEL=${{ matrix.api }}
-        
-        # Asignar los compiladores correctos de Clang proveídos por Google
-        export CC=$TOOLCHAIN/bin/$TARGET_HOST$API_LEVEL-clang
+        export CC=$TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api }}-clang
         export LD=$TOOLCHAIN/bin/llvm-ld
         export STRIP=$TOOLCHAIN/bin/llvm-strip
-        
-        # Banderas agresivas de optimización de tamaño de GCC/Clang (-Os)
         export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE"
         export LDFLAGS="-Wl,--gc-sections -pie"
         
-        # Ejecutar configuración del entorno de Dropbear libre de dependencias pesadas
-        ./configure \
-            --host=$TARGET_HOST \
-            --disable-zlib \
-            --disable-syslog \
-            --disable-utmp \
-            --disable-utmpx \
-            --disable-wtmp \
-            --disable-wtmpx \
-            --disable-loginfunc \
-            --disable-harden
-            
-        # Compilar en modo multi-binario (Todo en un único archivo ejecutable ejecutable)
+        ./configure --host=${{ matrix.target }} --disable-zlib --disable-syslog --disable-utmp --disable-utmpx --disable-wtmp --disable-wtmpx --disable-loginfunc --disable-harden
         make PROGRAMS="dropbear dbclient dropbearkey"
-        
-        # Aplicar Strip para remover absolutamente todas las tablas de debug/símbolos innecesarios
         $STRIP dropbearmulti
-        
-        # Crear estructura limpia para empaquetar el binario final
-        mkdir -p output/${{ matrix.arch }}
-        cp dropbearmulti output/${{ matrix.arch }}/dropbearmulti
+        mkdir -p output
+        cp dropbearmulti output/dropbearmulti
 
-    - name: Subir Binario Compilado como Artefacto
-      uses: actions/artifacts/upload-artifact@v4
+    - name: Subir Binario Android
+      uses: actions/upload-artifact@v4
       with:
-        name: dropbear-${{ matrix.arch }}
-        path: output/${{ matrix.arch }}/dropbearmulti
+        name: dropbear-android-${{ matrix.arch }}
+        path: output/dropbearmulti
+
+  # TRABAJO 2: COMPILACIÓN EN CONTENEDOR DE DEBIAN 11 PARA TU SERVIDOR
+  build-debian11:
+    runs-on: ubuntu-latest
+    # Corremos el proceso dentro de un contenedor oficial de Debian 11 puro para asegurar compatibilidad
+    container:
+      image: debian:11-slim
+    steps:
+    - name: Instalar herramientas de compilación en Debian 11
+      run: |
+        apt-get update
+        apt-get install -y git build-essential gcc make wget
+        
+    - name: Descargar Código Oficial de Dropbear
+      uses: actions/checkout@v4
+      with:
+        repository: 'mkj/dropbear'
+        ref: 'master'
+        fetch-depth: 1
+
+    - name: Inyectar Configuración Ultra-Ligera (localoptions.h)
+      run: |
+        cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SMALL_CODE 1
+        #define DROPBEAR_BLOWFISH 0
+        #define DROPBEAR_TWOFISH128 0
+        #define DROPBEAR_TWOFISH256 0
+        #define DROPBEAR_3DES 0
+        #define DROPBEAR_AES256 0
+        #define DROPBEAR_X11FWD 0
+        #define DROPBEAR_SFTPSERVER 0
+        #define DROPBEAR_AES128 1
+        #define DROPBEAR_CHACHA20POLY1305 1
+        #define DROPBEAR_CURVE25519 1
+        #define DROPBEAR_CLI_LOCALPORTFWD 1
+        #define DROPBEAR_SVR_LOCALPORTFWD 1
+        EOF
+
+    - name: Compilar nativamente para Debian 11
+      run: |
+        # Banderas de optimización nativas de Debian para CPU pequeña
+        export CFLAGS="-Os -fdata-sections -ffunction-sections"
+        export LDFLAGS="-Wl,--gc-sections"
+        
+        ./configure --disable-zlib --disable-syslog --disable-utmp --disable-utmpx --disable-wtmp --disable-wtmpx --disable-loginfunc --disable-harden
+        make PROGRAMS="dropbear dbclient dropbearkey"
+        strip dropbearmulti
+        mkdir -p output
+        cp dropbearmulti output/dropbearmulti-debian11
+
+    - name: Subir Binario Debian 11
+      uses: actions/upload-artifact@v4
+      with:
+        name: dropbear-servidor-debian11
+        path: output/dropbearmulti-debian11
