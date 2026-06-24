@@ -1,4 +1,4 @@
-name: Dropbear ARM64 Test
+name: Build Dropbear (Optimizado)
 
 on:
   push:
@@ -22,15 +22,23 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Inyectar localoptions.h
+    - name: Inyectar localoptions.h (Máxima Velocidad)
       run: |
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DROPBEAR_CLI_PASSWORD_AUTH 0
-        #define DISABLE_SYSLOG
+        #define DISABLE_SYSLOG 1
+        #define DO_HOST_LOOKUP 0
+        /* Desactivar cifrados lentos, dejar solo los más rápidos */
+        #define DROPBEAR_3DES 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
+        #define DROPBEAR_SHA1_96_MAC 0
+        #define DROPBEAR_SHA2_512_MAC 0
+        #define DROPBEAR_TWOFISH128 0
+        #define DROPBEAR_TWOFISH256 0
         EOF
 
-    - name: Compilar
+    - name: Compilar ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
@@ -40,15 +48,112 @@ jobs:
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
 
-        ./configure --host=aarch64-linux-android --disable-zlib
-        # LA SOLUCIÓN ESTÁ AQUÍ: Se añadió MULTI=1
+        ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
         make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         mkdir -p output
         cp dropbearmulti output/dropbearmulti-arm64
 
-    - name: Subir Binario
+    - name: Subir Binario ARM64
       uses: actions/upload-artifact@v4
       with:
         name: dropbear-arm64
         path: output/dropbearmulti-arm64
+
+  build-android-arm32:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Dropbear
+      uses: actions/checkout@v4
+      with:
+        repository: 'mkj/dropbear'
+        ref: 'DROPBEAR_2026.91'
+        fetch-depth: 1
+
+    - name: Setup NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r27c
+
+    - name: Inyectar localoptions.h
+      run: |
+        cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
+        #define DROPBEAR_CLI_PASSWORD_AUTH 0
+        #define DISABLE_SYSLOG 1
+        #define DO_HOST_LOOKUP 0
+        #define DROPBEAR_3DES 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
+        #define DROPBEAR_SHA1_96_MAC 0
+        #define DROPBEAR_SHA2_512_MAC 0
+        #define DROPBEAR_TWOFISH128 0
+        #define DROPBEAR_TWOFISH256 0
+        EOF
+
+    - name: Compilar ARM32 (armv7a)
+      env:
+        NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
+      run: |
+        export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
+        export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
+        export AR=$TOOLCHAIN/bin/llvm-ar
+        export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+        export STRIP=$TOOLCHAIN/bin/llvm-strip
+
+        ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
+        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        $STRIP dropbearmulti
+        mkdir -p output
+        cp dropbearmulti output/dropbearmulti-arm32
+
+    - name: Subir Binario ARM32
+      uses: actions/upload-artifact@v4
+      with:
+        name: dropbear-arm32
+        path: output/dropbearmulti-arm32
+
+  build-debian-x64:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Dropbear
+      uses: actions/checkout@v4
+      with:
+        repository: 'mkj/dropbear'
+        ref: 'DROPBEAR_2026.91'
+        fetch-depth: 1
+
+    - name: Instalar Musl (Para compilación estática)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
+
+    - name: Inyectar localoptions.h
+      run: |
+        cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
+        #define DROPBEAR_CLI_PASSWORD_AUTH 0
+        #define DISABLE_SYSLOG 1
+        #define DO_HOST_LOOKUP 0
+        #define DROPBEAR_3DES 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
+        #define DROPBEAR_SHA1_96_MAC 0
+        #define DROPBEAR_SHA2_512_MAC 0
+        #define DROPBEAR_TWOFISH128 0
+        #define DROPBEAR_TWOFISH256 0
+        EOF
+
+    - name: Compilar Estático (Debian 11)
+      run: |
+        # Usamos musl-gcc y LDFLAGS estáticos para que el binario sea 100% independiente
+        CC=musl-gcc LDFLAGS="-static" ./configure --disable-zlib --disable-syslog
+        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        strip dropbearmulti
+        mkdir -p output
+        cp dropbearmulti output/dropbearmulti-debian-x64
+
+    - name: Subir Binario Debian
+      uses: actions/upload-artifact@v4
+      with:
+        name: dropbear-debian-x64
+        path: output/dropbearmulti-debian-x64
