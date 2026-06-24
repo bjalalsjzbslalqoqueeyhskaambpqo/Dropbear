@@ -68,6 +68,10 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         EOF
 
+    - name: Parchear getpass para Android
+      run: |
+        sed -i 's/password = getpass(prompt)/password = getenv("DROPBEAR_PASSWORD")/' src/cli-auth.c
+
     - name: Compilar para Android ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
