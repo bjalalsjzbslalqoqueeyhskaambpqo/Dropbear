@@ -26,9 +26,9 @@ jobs:
         ndk-version: r27c
 
     - name: Instalar Dependencias
-      run: sudo apt-get update && sudo apt-get install -y musl-tools build-essential
+      run: sudo apt-get update && sudo apt-get install -y musl-tools build-essential libcrypt-dev
 
-    - name: Inyectar localoptions.h
+    - name: Inyectar localoptions.h Linux
       run: |
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_SVR_PASSWORD_AUTH 1
@@ -52,6 +52,21 @@ jobs:
         strip dropbearmulti
         cp dropbearmulti final_output/dropbearmulti-debian-x64
         make distclean
+
+    - name: Inyectar localoptions.h Android
+      run: |
+        cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
+        #define DROPBEAR_CLI_PASSWORD_AUTH 1
+        #define DISABLE_SYSLOG 1
+        #define DO_HOST_LOOKUP 0
+        #define DROPBEAR_3DES 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
+        #define DROPBEAR_SHA1_96_MAC 0
+        #define DROPBEAR_SHA2_512_MAC 0
+        #define DROPBEAR_TWOFISH128 0
+        #define DROPBEAR_TWOFISH256 0
+        EOF
 
     - name: Compilar para Android ARM64
       env:
