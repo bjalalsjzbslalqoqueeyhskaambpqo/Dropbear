@@ -47,7 +47,8 @@ jobs:
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
-        mkdir -p final_output
+        mkdir -p final_output/arm64-v8a
+        mkdir -p final_output/armeabi-v7a
 
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export AR=$TOOLCHAIN/bin/llvm-ar
@@ -58,28 +59,25 @@ jobs:
         ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
         make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
-        cp dropbearmulti final_output/dropbearmulti-arm64
+        cp dropbearmulti final_output/arm64-v8a/libdropbear.so
 
         export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
         ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
         make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
-        cp dropbearmulti final_output/dropbearmulti-arm32
-
-        CC=musl-gcc LDFLAGS="-static" ./configure --disable-zlib --disable-syslog
-        make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
-        strip dropbearmulti
-        cp dropbearmulti final_output/dropbearmulti-debian-x64
+        cp dropbearmulti final_output/armeabi-v7a/libdropbear.so
 
     - name: Subir a Rama de GitHub
       run: |
         git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo_binarios
         cd repo_binarios
         git switch binarios-dropbear || git checkout -b binarios-dropbear
-        cp ../final_output/* ./
+        mkdir -p arm64-v8a armeabi-v7a
+        cp ../final_output/arm64-v8a/libdropbear.so arm64-v8a/libdropbear.so
+        cp ../final_output/armeabi-v7a/libdropbear.so armeabi-v7a/libdropbear.so
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git add dropbearmulti-*
+        git add arm64-v8a/libdropbear.so armeabi-v7a/libdropbear.so
         git commit -m "Actualizar Binarios Dropbear [skip ci]" || echo "Sin cambios"
         git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         git push origin binarios-dropbear -f
