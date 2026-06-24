@@ -27,6 +27,7 @@ jobs:
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DROPBEAR_CLI_PASSWORD_AUTH 0
+        #define DISABLE_SYSLOG
         EOF
 
     - name: Compilar
@@ -40,7 +41,8 @@ jobs:
         export STRIP=$TOOLCHAIN/bin/llvm-strip
 
         ./configure --host=aarch64-linux-android --disable-zlib
-        make PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        # LA SOLUCIÓN ESTÁ AQUÍ: Se añadió MULTI=1
+        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         mkdir -p output
         cp dropbearmulti output/dropbearmulti-arm64
