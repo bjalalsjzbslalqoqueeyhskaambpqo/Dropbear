@@ -43,74 +43,58 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         EOF
 
-    # ============================================================================
-    # COMPILAR PARA LINUX x86_64 (VPS DEBIAN)
-    # ============================================================================
-
     - name: Compilar para Linux x86_64
       run: |
         mkdir -p final_output
-        
-        # Compilar estático con musl (sin dependencias externas)
         CC=musl-gcc ./configure --prefix=/opt/btserver --disable-zlib --enable-static
         make clean
         make LDFLAGS=-static MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         strip dropbearmulti
         cp dropbearmulti final_output/dropbearmulti-debian-x64
-        make clean
-
-    # ============================================================================
-    # COMPILAR PARA ANDROID ARM64 (64-bits)
-    # ============================================================================
+        make distclean
 
     - name: Compilar para Android ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         mkdir -p final_output/arm64-v8a
-
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export AR=$TOOLCHAIN/bin/llvm-ar
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
         export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
-
         ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
-        make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        make clean
+        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/arm64-v8a/libdropbear.so
-
-    # ============================================================================
-    # COMPILAR PARA ANDROID ARM32 (32-bits)
-    # ============================================================================
+        make distclean
 
     - name: Compilar para Android ARM32
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         mkdir -p final_output/armeabi-v7a
-
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export AR=$TOOLCHAIN/bin/llvm-ar
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
         export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
-
         ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
-        make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        make clean
+        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/armeabi-v7a/libdropbear.so
+        make distclean
 
     - name: Verificar Binarios
       run: |
         echo "=== LINUX x86_64 ==="
         file final_output/dropbearmulti-debian-x64
         ldd final_output/dropbearmulti-debian-x64 2>/dev/null || echo "(estático - sin dependencias)"
-        
         echo ""
         echo "=== ANDROID ARM64 ==="
         file final_output/arm64-v8a/libdropbear.so
-        
         echo ""
         echo "=== ANDROID ARM32 ==="
         file final_output/armeabi-v7a/libdropbear.so
