@@ -22,6 +22,13 @@ jobs:
       with:
         ndk-version: r27c
 
+    - name: Inyectar localoptions.h
+      run: |
+        cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
+        #define DROPBEAR_CLI_PASSWORD_AUTH 0
+        EOF
+
     - name: Compilar
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
