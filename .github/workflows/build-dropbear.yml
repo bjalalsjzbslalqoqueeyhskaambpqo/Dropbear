@@ -31,6 +31,9 @@ jobs:
     - name: Inyectar localoptions.h
       run: |
         cat << 'EOF' > localoptions.h
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
+        #define DROPBEAR_CLI_PASSWORD_AUTH 0
+        #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
