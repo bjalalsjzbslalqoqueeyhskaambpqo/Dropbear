@@ -25,7 +25,7 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Instalar Musl (Para Debian)
+    - name: Instalar Musl
       run: sudo apt-get update && sudo apt-get install -y musl-tools
 
     - name: Inyectar localoptions.h
@@ -48,26 +48,24 @@ jobs:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         mkdir -p final_output
-        
-        # 1. Compilar ARM64 (Android)
+
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-        export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
         export AR=$TOOLCHAIN/bin/llvm-ar
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
+
+        export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
         ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
         make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/dropbearmulti-arm64
 
-        # 2. Compilar ARM32 (Android Viejo)
         export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
         ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
         make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/dropbearmulti-arm32
 
-        # 3. Compilar x64 (Servidor Debian Estático)
         CC=musl-gcc LDFLAGS="-static" ./configure --disable-zlib --disable-syslog
         make clean && make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         strip dropbearmulti
@@ -75,17 +73,13 @@ jobs:
 
     - name: Subir a Rama de GitHub
       run: |
-        # Clonamos nuestro propio repositorio para guardar los binarios
-        git clone https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo_binarios
+        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo_binarios
         cd repo_binarios
-        
-        # Cambiamos o creamos la rama 'binarios-dropbear'
         git switch binarios-dropbear || git checkout -b binarios-dropbear
-        
-        # Copiamos los archivos y hacemos push
         cp ../final_output/* ./
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
         git add dropbearmulti-*
         git commit -m "Actualizar Binarios Dropbear [skip ci]" || echo "Sin cambios"
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         git push origin binarios-dropbear -f
