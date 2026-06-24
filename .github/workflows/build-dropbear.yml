@@ -62,7 +62,7 @@ jobs:
         export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
         ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
         make clean
-        make CFLAGS="-DDROPBEAR_SVR_PASSWORD_AUTH=0" MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        make CFLAGS="-DDROPBEAR_SVR_PASSWORD_AUTH=0 -DDROPBEAR_CLI_PASSWORD_AUTH=0" MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/arm64-v8a/libdropbear.so
         make distclean
@@ -79,7 +79,7 @@ jobs:
         export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
         ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
         make clean
-        make CFLAGS="-DDROPBEAR_SVR_PASSWORD_AUTH=0" MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        make CFLAGS="-DDROPBEAR_SVR_PASSWORD_AUTH=0 -DDROPBEAR_CLI_PASSWORD_AUTH=0" MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti final_output/armeabi-v7a/libdropbear.so
         make distclean
