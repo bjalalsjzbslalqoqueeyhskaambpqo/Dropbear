@@ -1,12 +1,11 @@
-name: Compilación Inteligente Dropbear (Android y Debian 11)
+name: Compilación Dropbear Mínima
 
 on:
   push:
-    branches: [ "main", "master" ]
-  workflow_dispatch: # Botón para ejecutar manualmente desde la web
+    branches: ["main", "master"]
+  workflow_dispatch:
 
 jobs:
-  # TRABAJO 1: COMPILACIÓN PARA ANDROID (CROSS-COMPILATION)
   build-android:
     runs-on: ubuntu-latest
     strategy:
@@ -19,11 +18,11 @@ jobs:
             target: "aarch64-linux-android"
             api: "21"
     steps:
-    - name: Descargar Código Oficial de Dropbear
+    - name: Descargar Código de Dropbear
       uses: actions/checkout@v4
       with:
         repository: 'mkj/dropbear'
-        ref: 'master'
+        ref: 'DROPBEAR_2025.87'
         fetch-depth: 1
 
     - name: Configurar Android NDK
@@ -32,97 +31,188 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Inyectar Configuración Ultra-Ligera (localoptions.h)
+    - name: Inyectar localoptions.h mínimo
       run: |
         cat << 'EOF' > localoptions.h
+        /* ── Tamaño ── */
         #define DROPBEAR_SMALL_CODE 1
+
+        /* ── Cifrados: solo ChaCha20-Poly1305 (más ligero en CPU sin AES-NI) ── */
+        #define DROPBEAR_CHACHA20POLY1305 1
+        #define DROPBEAR_AES128 0
+        #define DROPBEAR_AES256 0
+        #define DROPBEAR_3DES 0
         #define DROPBEAR_BLOWFISH 0
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
-        #define DROPBEAR_3DES 0
-        #define DROPBEAR_AES256 0
-        #define DROPBEAR_X11FWD 0
-        #define DROPBEAR_SFTPSERVER 0
-        #define DROPBEAR_AES128 1
-        #define DROPBEAR_CHACHA20POLY1305 1
+
+        /* ── MACs: solo el integrado en ChaCha20-Poly1305, deshabilitar el resto ── */
+        #define DROPBEAR_SHA1_HMAC 0
+        #define DROPBEAR_SHA1_96_HMAC 0
+        #define DROPBEAR_SHA2_256_HMAC 0
+        #define DROPBEAR_SHA2_512_HMAC 0
+        #define DROPBEAR_MD5_HMAC 0
+
+        /* ── Intercambio de claves: solo Curve25519 (mínimo válido moderno) ── */
         #define DROPBEAR_CURVE25519 1
+        #define DROPBEAR_ECDH 0
+        #define DROPBEAR_DH_GROUP1 0
+        #define DROPBEAR_DH_GROUP14_SHA1 0
+        #define DROPBEAR_DH_GROUP14_SHA256 0
+        #define DROPBEAR_DH_GROUP16 0
+
+        /* ── Claves de host: solo Ed25519 (mínimo válido) ── */
+        #define DROPBEAR_ED25519 1
+        #define DROPBEAR_ECDSA 0
+        #define DROPBEAR_RSA 0
+        #define DROPBEAR_DSS 0
+
+        /* ── Autenticación: solo contraseña y pubkey ── */
+        #define DROPBEAR_SVR_PASSWORD_AUTH 1
+        #define DROPBEAR_SVR_PAM_AUTH 0
+        #define DROPBEAR_SVR_PUBKEY_AUTH 1
+        #define DROPBEAR_CLI_PASSWORD_AUTH 1
+        #define DROPBEAR_CLI_PUBKEY_AUTH 1
+        #define DROPBEAR_CLI_AGENTFWD 0
+
+        /* ── Reenvío de puertos: solo local (para túneles básicos) ── */
         #define DROPBEAR_CLI_LOCALPORTFWD 1
         #define DROPBEAR_SVR_LOCALPORTFWD 1
+        #define DROPBEAR_CLI_REMOTEFWD 0
+        #define DROPBEAR_SVR_REMOTEFWD 0
+
+        /* ── Todo lo demás: apagado ── */
+        #define DROPBEAR_X11FWD 0
+        #define DROPBEAR_SFTPSERVER 0
+        #define DROPBEAR_SVR_AGENTFWD 0
+        #define DROPBEAR_ENABLE_CTR_MODE 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
         EOF
 
-    - name: Ejecutar Compilación Cruzada Android
+    - name: Compilar para Android
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export CC=$TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api }}-clang
-        export LD=$TOOLCHAIN/bin/llvm-ld
+        export AR=$TOOLCHAIN/bin/llvm-ar
+        export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
-        export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE"
+        export CFLAGS="-Os -fdata-sections -ffunction-sections -fPIE -fPIC"
         export LDFLAGS="-Wl,--gc-sections -pie"
-        
-        ./configure --host=${{ matrix.target }} --disable-zlib --disable-syslog --disable-utmp --disable-utmpx --disable-wtmp --disable-wtmpx --disable-loginfunc --disable-harden
-        make PROGRAMS="dropbear dbclient dropbearkey"
+
+        autoconf
+        autoheader
+        ./configure \
+          --host=${{ matrix.target }} \
+          --disable-zlib \
+          --disable-syslog \
+          --disable-utmp \
+          --disable-utmpx \
+          --disable-wtmp \
+          --disable-wtmpx \
+          --disable-loginfunc \
+          --disable-harden
+        make PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
         mkdir -p output
-        cp dropbearmulti output/dropbearmulti
+        cp dropbearmulti output/dropbearmulti-${{ matrix.arch }}
 
     - name: Subir Binario Android
       uses: actions/upload-artifact@v4
       with:
         name: dropbear-android-${{ matrix.arch }}
-        path: output/dropbearmulti
+        path: output/dropbearmulti-${{ matrix.arch }}
 
-  # TRABAJO 2: COMPILACIÓN EN CONTENEDOR DE DEBIAN 11 PARA TU SERVIDOR
   build-debian11:
     runs-on: ubuntu-latest
-    # Corremos el proceso dentro de un contenedor oficial de Debian 11 puro para asegurar compatibilidad
     container:
       image: debian:11-slim
     steps:
-    - name: Instalar herramientas de compilación en Debian 11
+    - name: Instalar dependencias
       run: |
         apt-get update
-        apt-get install -y git build-essential gcc make wget
-        
-    - name: Descargar Código Oficial de Dropbear
+        apt-get install -y git build-essential gcc make autoconf
+
+    - name: Descargar Código de Dropbear
       uses: actions/checkout@v4
       with:
         repository: 'mkj/dropbear'
-        ref: 'master'
+        ref: 'DROPBEAR_2025.87'
         fetch-depth: 1
 
-    - name: Inyectar Configuración Ultra-Ligera (localoptions.h)
+    - name: Inyectar localoptions.h mínimo
       run: |
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_SMALL_CODE 1
+
+        #define DROPBEAR_CHACHA20POLY1305 1
+        #define DROPBEAR_AES128 0
+        #define DROPBEAR_AES256 0
+        #define DROPBEAR_3DES 0
         #define DROPBEAR_BLOWFISH 0
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
-        #define DROPBEAR_3DES 0
-        #define DROPBEAR_AES256 0
-        #define DROPBEAR_X11FWD 0
-        #define DROPBEAR_SFTPSERVER 0
-        #define DROPBEAR_AES128 1
-        #define DROPBEAR_CHACHA20POLY1305 1
+
+        #define DROPBEAR_SHA1_HMAC 0
+        #define DROPBEAR_SHA1_96_HMAC 0
+        #define DROPBEAR_SHA2_256_HMAC 0
+        #define DROPBEAR_SHA2_512_HMAC 0
+        #define DROPBEAR_MD5_HMAC 0
+
         #define DROPBEAR_CURVE25519 1
+        #define DROPBEAR_ECDH 0
+        #define DROPBEAR_DH_GROUP1 0
+        #define DROPBEAR_DH_GROUP14_SHA1 0
+        #define DROPBEAR_DH_GROUP14_SHA256 0
+        #define DROPBEAR_DH_GROUP16 0
+
+        #define DROPBEAR_ED25519 1
+        #define DROPBEAR_ECDSA 0
+        #define DROPBEAR_RSA 0
+        #define DROPBEAR_DSS 0
+
+        #define DROPBEAR_SVR_PASSWORD_AUTH 1
+        #define DROPBEAR_SVR_PAM_AUTH 0
+        #define DROPBEAR_SVR_PUBKEY_AUTH 1
+        #define DROPBEAR_CLI_PASSWORD_AUTH 1
+        #define DROPBEAR_CLI_PUBKEY_AUTH 1
+        #define DROPBEAR_CLI_AGENTFWD 0
+
         #define DROPBEAR_CLI_LOCALPORTFWD 1
         #define DROPBEAR_SVR_LOCALPORTFWD 1
+        #define DROPBEAR_CLI_REMOTEFWD 0
+        #define DROPBEAR_SVR_REMOTEFWD 0
+
+        #define DROPBEAR_X11FWD 0
+        #define DROPBEAR_SFTPSERVER 0
+        #define DROPBEAR_SVR_AGENTFWD 0
+        #define DROPBEAR_ENABLE_CTR_MODE 0
+        #define DROPBEAR_ENABLE_CBC_MODE 0
         EOF
 
-    - name: Compilar nativamente para Debian 11
+    - name: Compilar para Debian 11+
       run: |
-        # Banderas de optimización nativas de Debian para CPU pequeña
         export CFLAGS="-Os -fdata-sections -ffunction-sections"
         export LDFLAGS="-Wl,--gc-sections"
-        
-        ./configure --disable-zlib --disable-syslog --disable-utmp --disable-utmpx --disable-wtmp --disable-wtmpx --disable-loginfunc --disable-harden
-        make PROGRAMS="dropbear dbclient dropbearkey"
+
+        autoconf
+        autoheader
+        ./configure \
+          --disable-zlib \
+          --disable-syslog \
+          --disable-utmp \
+          --disable-utmpx \
+          --disable-wtmp \
+          --disable-wtmpx \
+          --disable-loginfunc \
+          --disable-harden
+        make PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
         strip dropbearmulti
         mkdir -p output
         cp dropbearmulti output/dropbearmulti-debian11
 
-    - name: Subir Binario Debian 11
+    - name: Subir Binario Debian 11+
       uses: actions/upload-artifact@v4
       with:
         name: dropbear-servidor-debian11
