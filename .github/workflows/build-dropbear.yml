@@ -73,7 +73,6 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
-        cp localoptions.h .
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
@@ -99,7 +98,6 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
-        cp localoptions.h .
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
