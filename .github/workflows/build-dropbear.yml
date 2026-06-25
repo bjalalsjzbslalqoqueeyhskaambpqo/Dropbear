@@ -50,6 +50,10 @@ jobs:
         sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
+        sed -i 's|/proc/interrupts|/dev/null|g' src/dbrandom.c
+        sed -i 's|/proc/net/dev|/dev/null|g' src/dbrandom.c
+        sed -i 's|/proc/meminfo|/dev/null|g' src/dbrandom.c
+
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
         #define DROPBEAR_CLI_PUBKEY_AUTH 1
@@ -64,6 +68,7 @@ jobs:
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
+        #define DROPBEAR_USE_PRNGD 0
         EOF
 
     - name: Compilar ARM64
