@@ -25,70 +25,28 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Inspeccionar antes de parchear
+    - name: Crear localoptions.h
       run: |
-        echo "=== known_hosts en cli-runopts.c ==="
-        grep -n "known_hosts\|known_host\|\.ssh" src/cli-runopts.c | head -20
-        echo "=== /proc en dbrandom.c ==="
-        grep -n "process_file.*proc" src/dbrandom.c
-        echo "=== HOME usage en cli-runopts.c ==="
-        grep -n "HOME\|getenv\|getpwuid\|passwd" src/cli-runopts.c | head -20
-
-    - name: Aplicar parches para Android
-      run: |
-        # ---------- getpass (sin terminal) ----------
-        cat << 'GETPASS_EOF' > src/netbsd_getpass.c
-        #include <stdio.h>
-        #include <stdlib.h>
-        #include <string.h>
-        #include <unistd.h>
-
-        char *getpass(const char *prompt) {
-            static char buf[1024];
-            const char *env = getenv("DROPBEAR_PASSWORD");
-            if (env) {
-                strncpy(buf, env, sizeof(buf) - 1);
-                buf[sizeof(buf) - 1] = '\0';
-                return buf;
-            }
-            buf[0] = '\0';
-            return buf;
-        }
-        GETPASS_EOF
-
-        echo 'char *getpass(const char *prompt);' >> src/includes.h
-        sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
-        grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
-
-        # ---------- /proc/* → /dev/null (TODOS los que quedaron) ----------
-        sed -i 's|process_file(&hs, "/proc/interrupts"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/loadavg"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/sys/kernel/random/entropy_avail"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/net/netstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/net/dev"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/net/tcp"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/net/rt_cache"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-        sed -i 's|process_file(&hs, "/proc/vmstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
-
-        # ---------- Patch known_hosts: redirigir a /dev/null ----------
-        # Primero ver el string exacto que usa (puede ser "known_hosts" hardcoded o via HOME)
-        # Forzamos que cualquier path construido con .ssh/known_hosts apunte a /dev/null
-        sed -i 's|".ssh/known_hosts"|"/dev/null"|g' src/cli-runopts.c || true
-        sed -i 's|"/.ssh/known_hosts"|"/dev/null"|g' src/cli-runopts.c || true
-        sed -i 's|known_hosts|known_hosts_disabled|g' src/cli-runopts.c || true
-
-        # ---------- Patch identity file por defecto ----------
-        sed -i 's|".ssh/id_dropbear"|"/dev/null"|g' src/cli-runopts.c || true
-        sed -i 's|"/.ssh/id_dropbear"|"/dev/null"|g' src/cli-runopts.c || true
-
-        # ---------- localoptions.h ----------
         cat << 'EOF' > localoptions.h
-        #define DROPBEAR_CLI_PASSWORD_AUTH 1
-        #define DROPBEAR_CLI_PUBKEY_AUTH 1
+        /* Siguiendo ribbons/android-dropbear */
+
+        /* Sin password auth: getpass() no funciona en Android */
+        #define DROPBEAR_CLI_PASSWORD_AUTH 0
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
+
+        /* Solo pubkey */
+        #define DROPBEAR_CLI_PUBKEY_AUTH 1
+
+        /* Android no tiene syslog */
         #define DISABLE_SYSLOG 1
+
+        /* Sin resolución de hostnames inversa */
         #define DO_HOST_LOOKUP 0
+
+        /* Binario más pequeño */
         #define DROPBEAR_SMALL_CODE 1
+
+        /* Cifrados innecesarios desactivados */
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
@@ -96,17 +54,7 @@ jobs:
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
-        #define DROPBEAR_USE_PRNGD 0
         EOF
-
-    - name: Verificar parches
-      run: |
-        echo "=== /proc restantes en dbrandom.c (debería estar vacío) ==="
-        grep -n "process_file.*proc" src/dbrandom.c || echo "OK: sin /proc"
-        echo "=== known_hosts en cli-runopts.c ==="
-        grep -n "known_hosts\|id_dropbear" src/cli-runopts.c | head -10
-        echo "=== Makefile ==="
-        grep "netbsd_getpass" Makefile.in
 
     - name: Compilar ARM64
       env:
@@ -125,12 +73,13 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
+        cp localoptions.h .
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/arm64-v8a/libdropbear.so
-        echo "=== Strings problemáticos ARM64 ==="
-        strings output/arm64-v8a/libdropbear.so | grep -E "^/proc|/data/tests|known_hosts|id_dropbear" || echo "OK"
+        echo "=== Verificar strings problemáticos ARM64 ==="
+        strings output/arm64-v8a/libdropbear.so | grep -E "getpass|/data/tests|getpwuid" || echo "OK: limpio"
         make distclean
 
     - name: Compilar ARM32
@@ -150,12 +99,13 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
+        cp localoptions.h .
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/armeabi-v7a/libdropbear.so
-        echo "=== Strings problemáticos ARM32 ==="
-        strings output/armeabi-v7a/libdropbear.so | grep -E "^/proc|/data/tests|known_hosts|id_dropbear" || echo "OK"
+        echo "=== Verificar strings problemáticos ARM32 ==="
+        strings output/armeabi-v7a/libdropbear.so | grep -E "getpass|/data/tests|getpwuid" || echo "OK: limpio"
         make distclean
 
     - name: Verificar binarios finales
