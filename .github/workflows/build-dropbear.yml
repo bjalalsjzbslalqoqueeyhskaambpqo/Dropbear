@@ -25,16 +25,14 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Inspeccionar dbrandom.c
+    - name: Inspeccionar antes de parchear
       run: |
-        echo "=== PATHS EN dbrandom.c ==="
-        grep -n "data\|proc\|dev\|seed\|random\|home\|tmp" src/dbrandom.c | head -60
-        echo "=== PATHS EN cli-session.c ==="
-        grep -n "home\|ssh\|known\|tmp\|proc\|data" src/cli-session.c | head -40
-        echo "=== PATHS EN runopts.c ==="
-        grep -n "home\|\.ssh\|known_hosts\|tmp" src/runopts.c | head -40
-        echo "=== PATHS EN common-session.c ==="
-        grep -n "home\|tmp\|proc\|data" src/common-session.c | head -40
+        echo "=== known_hosts en cli-runopts.c ==="
+        grep -n "known_hosts\|known_host\|\.ssh" src/cli-runopts.c | head -20
+        echo "=== /proc en dbrandom.c ==="
+        grep -n "process_file.*proc" src/dbrandom.c
+        echo "=== HOME usage en cli-runopts.c ==="
+        grep -n "HOME\|getenv\|getpwuid\|passwd" src/cli-runopts.c | head -20
 
     - name: Aplicar parches para Android
       run: |
@@ -62,36 +60,35 @@ jobs:
         sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
-        # ---------- /proc/* → /dev/null (evita lecturas bloqueadas por SELinux) ----------
-        sed -i 's|/proc/interrupts|/dev/null|g' src/dbrandom.c
-        sed -i 's|/proc/net/dev|/dev/null|g' src/dbrandom.c
-        sed -i 's|/proc/meminfo|/dev/null|g' src/dbrandom.c
-        sed -i 's|/proc/sys/kernel/random/uuid|/dev/null|g' src/dbrandom.c
+        # ---------- /proc/* → /dev/null (TODOS los que quedaron) ----------
+        sed -i 's|process_file(&hs, "/proc/interrupts"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/loadavg"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/sys/kernel/random/entropy_avail"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/netstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/dev"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/tcp"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/rt_cache"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/vmstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
 
-        # ---------- Patch known_hosts: respetar la variable HOME en runtime ----------
-        # Evita que busque /data/tests/.ssh/known_hosts (path bloqueado por SELinux)
-        # dbclient con -y ignora known_hosts, pero dropbear igual intenta abrir el path
-        sed -i 's|"/.ssh/known_hosts"|getenv("DROPBEAR_KNOWN_HOSTS") ? getenv("DROPBEAR_KNOWN_HOSTS") : "/dev/null"|g' src/cli-runopts.c || true
-        sed -i 's|"/.ssh/known_hosts"|getenv("DROPBEAR_KNOWN_HOSTS") ? getenv("DROPBEAR_KNOWN_HOSTS") : "/dev/null"|g' src/runopts.c || true
+        # ---------- Patch known_hosts: redirigir a /dev/null ----------
+        # Primero ver el string exacto que usa (puede ser "known_hosts" hardcoded o via HOME)
+        # Forzamos que cualquier path construido con .ssh/known_hosts apunte a /dev/null
+        sed -i 's|".ssh/known_hosts"|"/dev/null"|g' src/cli-runopts.c || true
+        sed -i 's|"/.ssh/known_hosts"|"/dev/null"|g' src/cli-runopts.c || true
+        sed -i 's|known_hosts|known_hosts_disabled|g' src/cli-runopts.c || true
 
-        # ---------- Patch authorized_keys ----------
-        sed -i 's|"/.ssh/authorized_keys"|"/dev/null"|g' src/svr-authpubkey.c || true
+        # ---------- Patch identity file por defecto ----------
+        sed -i 's|".ssh/id_dropbear"|"/dev/null"|g' src/cli-runopts.c || true
+        sed -i 's|"/.ssh/id_dropbear"|"/dev/null"|g' src/cli-runopts.c || true
 
-        # ---------- Patch identity file default ----------
-        sed -i 's|"/.ssh/id_dropbear"|getenv("DROPBEAR_KEY_FILE") ? getenv("DROPBEAR_KEY_FILE") : "/dev/null"|g' src/cli-runopts.c || true
-
-        # ---------- localoptions.h: solo lo que necesitamos (dbclient) ----------
+        # ---------- localoptions.h ----------
         cat << 'EOF' > localoptions.h
-        /* Solo compilamos dbclient, dropbearkey y dropbearconvert (no servidor) */
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
         #define DROPBEAR_CLI_PUBKEY_AUTH 1
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
-        #define DROPBEAR_SERVER 0
         #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
         #define DROPBEAR_SMALL_CODE 1
-
-        /* Deshabilitar cifrados innecesarios para reducir tamaño */
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
@@ -100,19 +97,15 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
         #define DROPBEAR_USE_PRNGD 0
-
-        /* Deshabilitar cosas que necesitan root o /etc/ */
-        #define DROPBEAR_SVR_REMOTETCPFWD 0
-        #define DROPBEAR_SVR_LOCALTCPFWD 0
         EOF
 
-    - name: Verificar parches aplicados
+    - name: Verificar parches
       run: |
-        echo "=== known_hosts patch ==="
-        grep -n "known_hosts\|DROPBEAR_KNOWN" src/cli-runopts.c src/runopts.c 2>/dev/null || echo "archivo no encontrado o no parchado"
-        echo "=== dbrandom patch ==="
-        grep -n "/proc\|/dev/null" src/dbrandom.c | head -20
-        echo "=== Makefile patch ==="
+        echo "=== /proc restantes en dbrandom.c (debería estar vacío) ==="
+        grep -n "process_file.*proc" src/dbrandom.c || echo "OK: sin /proc"
+        echo "=== known_hosts en cli-runopts.c ==="
+        grep -n "known_hosts\|id_dropbear" src/cli-runopts.c | head -10
+        echo "=== Makefile ==="
         grep "netbsd_getpass" Makefile.in
 
     - name: Compilar ARM64
@@ -136,8 +129,8 @@ jobs:
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/arm64-v8a/libdropbear.so
-        echo "=== Verificar strings problemáticos en binario ARM64 ==="
-        strings output/arm64-v8a/libdropbear.so | grep -E "^/proc|^/etc|^/data/tests|\.ssh" || echo "OK: sin paths problemáticos"
+        echo "=== Strings problemáticos ARM64 ==="
+        strings output/arm64-v8a/libdropbear.so | grep -E "^/proc|/data/tests|known_hosts|id_dropbear" || echo "OK"
         make distclean
 
     - name: Compilar ARM32
@@ -161,8 +154,8 @@ jobs:
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/armeabi-v7a/libdropbear.so
-        echo "=== Verificar strings problemáticos en binario ARM32 ==="
-        strings output/armeabi-v7a/libdropbear.so | grep -E "^/proc|^/etc|^/data/tests|\.ssh" || echo "OK: sin paths problemáticos"
+        echo "=== Strings problemáticos ARM32 ==="
+        strings output/armeabi-v7a/libdropbear.so | grep -E "^/proc|/data/tests|known_hosts|id_dropbear" || echo "OK"
         make distclean
 
     - name: Verificar binarios finales
