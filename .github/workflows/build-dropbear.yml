@@ -1,4 +1,4 @@
-name: Build Dropbear Binaries
+name: Build Dropbear Android
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-push:
+  build-android:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Dropbear
@@ -25,111 +25,96 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Instalar Dependencias
-      run: sudo apt-get update && sudo apt-get install -y musl-tools build-essential libcrypt-dev
-
-    - name: Inyectar localoptions.h Linux
-      run: |
-        cat << 'EOF' > localoptions.h
-        #define DROPBEAR_SVR_PASSWORD_AUTH 1
-        #define DROPBEAR_CLI_PASSWORD_AUTH 1
-        #define DISABLE_SYSLOG 1
-        #define DO_HOST_LOOKUP 0
-        #define DROPBEAR_3DES 0
-        #define DROPBEAR_ENABLE_CBC_MODE 0
-        #define DROPBEAR_SHA1_96_MAC 0
-        #define DROPBEAR_SHA2_512_MAC 0
-        #define DROPBEAR_TWOFISH128 0
-        #define DROPBEAR_TWOFISH256 0
-        EOF
-
-    - name: Compilar para Linux x86_64
-      run: |
-        mkdir -p final_output
-        CC=musl-gcc ./configure --prefix=/opt/btserver --disable-zlib --enable-static
-        make clean
-        make LDFLAGS=-static MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
-        strip dropbearmulti
-        cp dropbearmulti final_output/dropbearmulti-debian-x64
-        make distclean
-
     - name: Inyectar localoptions.h Android
       run: |
         cat << 'EOF' > localoptions.h
+        /* Cliente Android - solo dbclient */
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
+        #define DROPBEAR_CLI_PUBKEY_AUTH 0
+
+        /* Rendimiento */
         #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
+        #define DROPBEAR_SMALL_CODE 1
+
+        /* Ciphers - solo lo necesario */
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
         #define DROPBEAR_SHA2_512_MAC 0
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
+        #define DROPBEAR_BLOWFISH 0
+
+        /* Forzar lectura de password desde entorno */
+        #define DROPBEAR_PASSWORD_ENV "DROPBEAR_PASSWORD"
         EOF
 
-    - name: Parchear getpass para Android
-      run: |
-        sed -i 's/password = getpass(prompt)/password = getenv("DROPBEAR_PASSWORD")/' src/cli-auth.c
-
-    - name: Compilar para Android ARM64
+    - name: Compilar ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
-        mkdir -p final_output/arm64-v8a
-        export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
-        export AR=$TOOLCHAIN/bin/llvm-ar
-        export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-        export STRIP=$TOOLCHAIN/bin/llvm-strip
+        mkdir -p output/arm64-v8a
+        TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
-        ./configure --host=aarch64-linux-android --disable-zlib --disable-syslog
-        make clean
-        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
-        $STRIP dropbearmulti
-        cp dropbearmulti final_output/arm64-v8a/libdropbear.so
-        make distclean
-
-    - name: Compilar para Android ARM32
-      env:
-        NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
-      run: |
-        mkdir -p final_output/armeabi-v7a
-        export TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
         export AR=$TOOLCHAIN/bin/llvm-ar
         export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
         export STRIP=$TOOLCHAIN/bin/llvm-strip
-        export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
-        ./configure --host=arm-linux-androideabi --disable-zlib --disable-syslog
+        ./configure \
+          --host=aarch64-linux-android \
+          --disable-zlib \
+          --disable-syslog \
+          --disable-wtmp \
+          --disable-lastlog
         make clean
-        make MULTI=1 PROGRAMS="dropbear dbclient dropbearkey" -j$(nproc)
+        make MULTI=1 PROGRAMS="dbclient dropbearkey" -j$(nproc)
         $STRIP dropbearmulti
-        cp dropbearmulti final_output/armeabi-v7a/libdropbear.so
+        cp dropbearmulti output/arm64-v8a/libdropbear.so
         make distclean
 
-    - name: Verificar Binarios
+    - name: Compilar ARM32
+      env:
+        NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
-        echo "=== LINUX x86_64 ==="
-        file final_output/dropbearmulti-debian-x64
-        ldd final_output/dropbearmulti-debian-x64 2>/dev/null || echo "(estático - sin dependencias)"
-        echo ""
-        echo "=== ANDROID ARM64 ==="
-        file final_output/arm64-v8a/libdropbear.so
-        echo ""
-        echo "=== ANDROID ARM32 ==="
-        file final_output/armeabi-v7a/libdropbear.so
+        mkdir -p output/armeabi-v7a
+        TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
+        export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang
+        export AR=$TOOLCHAIN/bin/llvm-ar
+        export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+        export STRIP=$TOOLCHAIN/bin/llvm-strip
+        ./configure \
+          --host=arm-linux-androideabi \
+          --disable-zlib \
+          --disable-syslog \
+          --disable-wtmp \
+          --disable-lastlog
+        make clean
+        make MULTI=1 PROGRAMS="dbclient dropbearkey" -j$(nproc)
+        $STRIP dropbearmulti
+        cp dropbearmulti output/armeabi-v7a/libdropbear.so
+        make distclean
 
-    - name: Subir a Rama de GitHub
+    - name: Verificar
       run: |
-        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo_binarios
-        cd repo_binarios
-        git switch binarios-dropbear || git checkout -b binarios-dropbear
+        echo "=== ARM64 ==="
+        file output/arm64-v8a/libdropbear.so
+        ls -lh output/arm64-v8a/libdropbear.so
+        echo "=== ARM32 ==="
+        file output/armeabi-v7a/libdropbear.so
+        ls -lh output/armeabi-v7a/libdropbear.so
+
+    - name: Push a rama binarios-dropbear
+      run: |
+        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+        cd repo
+        git switch binarios-dropbear 2>/dev/null || git checkout -b binarios-dropbear
         mkdir -p arm64-v8a armeabi-v7a
-        cp ../final_output/dropbearmulti-debian-x64 dropbearmulti-debian-x64
-        cp ../final_output/arm64-v8a/libdropbear.so arm64-v8a/libdropbear.so
-        cp ../final_output/armeabi-v7a/libdropbear.so armeabi-v7a/libdropbear.so
+        cp ../output/arm64-v8a/libdropbear.so arm64-v8a/libdropbear.so
+        cp ../output/armeabi-v7a/libdropbear.so armeabi-v7a/libdropbear.so
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git add dropbearmulti-debian-x64 arm64-v8a/libdropbear.so armeabi-v7a/libdropbear.so
-        git commit -m "Actualizar Binarios Dropbear (Linux x86_64 + Android) [skip ci]" || echo "Sin cambios"
+        git add arm64-v8a/libdropbear.so armeabi-v7a/libdropbear.so
+        git commit -m "dropbear android $(date -u +%Y-%m-%d)" || echo "sin cambios"
         git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         git push origin binarios-dropbear -f
