@@ -25,25 +25,71 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Parchear getpass y localoptions.h
+    - name: Aplicar parches para Android
       run: |
-        # Reemplazar getpass() por getenv() en cli-auth.c
-        sed -i 's/password = getpass(prompt)/password = getenv("DROPBEAR_PASSWORD")/' src/cli-auth.c
+        # 1. Agregar implementación propia de getpass() (NetBSD) 
+        #    porque Android no tiene getpass() en su libc
+        cat << 'GETPASS_EOF' > netbsd_getpass.c
+        #include <assert.h>
+        #include <paths.h>
+        #include <pwd.h>
+        #include <signal.h>
+        #include <stdio.h>
+        #include <termios.h>
+        #include <unistd.h>
 
-        # Verificar que el parche se aplicó
-        grep -n "DROPBEAR_PASSWORD" src/cli-auth.c || { echo "ERROR: parche no aplicado"; exit 1; }
+        char *getpass(const char *prompt) {
+            struct termios term;
+            int ch;
+            char *p;
+            FILE *fp, *outfp;
+            int echo;
+            static char buf[1024];
+            sigset_t oset, nset;
 
+            if ((outfp = fp = fopen("/dev/tty", "w+")) == NULL) {
+                outfp = stderr;
+                fp = stdin;
+            }
+            sigemptyset(&nset);
+            sigaddset(&nset, SIGINT);
+            sigaddset(&nset, SIGTSTP);
+            sigprocmask(SIG_BLOCK, &nset, &oset);
+            tcgetattr(fileno(fp), &term);
+            if ((echo = (term.c_lflag & ECHO)) != 0) {
+                term.c_lflag &= ~ECHO;
+                tcsetattr(fileno(fp), TCSAFLUSH, &term);
+            }
+            if (prompt) fputs(prompt, outfp);
+            rewind(outfp);
+            for (p = buf; (ch = getc(fp)) != EOF && ch != '\n';)
+                if (p < buf + sizeof(buf) - 1) *p++ = ch;
+            *p = '\0';
+            write(fileno(outfp), "\n", 1);
+            if (echo) {
+                term.c_lflag |= ECHO;
+                tcsetattr(fileno(fp), TCSAFLUSH, &term);
+            }
+            sigprocmask(SIG_SETMASK, &oset, NULL);
+            if (fp != stdin) fclose(fp);
+            return buf;
+        }
+        GETPASS_EOF
+
+        # 2. Registrar netbsd_getpass.o en el Makefile para que linkee
+        sed -i 's/^CLIOBJS=.*/& netbsd_getpass.o/' Makefile.in
+
+        # Verificar
+        grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
+
+        # 3. localoptions.h - sin deshabilitar SVR_PUBKEY_AUTH
+        #    porque sysoptions.h lo requiere aunque compilemos solo el cliente
         cat << 'EOF' > localoptions.h
-        /* Android client only */
-        #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
-        #define DROPBEAR_CLI_PUBKEY_AUTH 0
-        #define DROPBEAR_SVR_PUBKEY_AUTH 0
-
+        #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
         #define DROPBEAR_SMALL_CODE 1
-
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
@@ -67,6 +113,7 @@ jobs:
           --host=aarch64-linux-android \
           --disable-zlib \
           --disable-syslog \
+          --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
         make clean
@@ -89,6 +136,7 @@ jobs:
           --host=arm-linux-androideabi \
           --disable-zlib \
           --disable-syslog \
+          --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
         make clean
