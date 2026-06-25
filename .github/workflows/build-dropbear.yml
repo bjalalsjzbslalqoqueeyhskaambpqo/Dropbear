@@ -25,28 +25,24 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Crear localoptions.h
+    - name: Aplicar parches y localoptions
       run: |
+        sed -i 's|process_file(&hs, "/proc/interrupts"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/loadavg"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/sys/kernel/random/entropy_avail"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/netstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/dev"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/tcp"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/net/rt_cache"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        sed -i 's|process_file(&hs, "/proc/vmstat"|process_file(\&hs, "/dev/null"|g' src/dbrandom.c
+        grep -n "process_file.*proc" src/dbrandom.c || echo "OK: sin /proc"
         cat << 'EOF' > localoptions.h
-        /* Siguiendo ribbons/android-dropbear */
-
-        /* Sin password auth: getpass() no funciona en Android */
         #define DROPBEAR_CLI_PASSWORD_AUTH 0
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
-
-        /* Solo pubkey */
         #define DROPBEAR_CLI_PUBKEY_AUTH 1
-
-        /* Android no tiene syslog */
         #define DISABLE_SYSLOG 1
-
-        /* Sin resolución de hostnames inversa */
         #define DO_HOST_LOOKUP 0
-
-        /* Binario más pequeño */
         #define DROPBEAR_SMALL_CODE 1
-
-        /* Cifrados innecesarios desactivados */
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
@@ -55,6 +51,7 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
         EOF
+        cat localoptions.h
 
     - name: Compilar ARM64
       env:
@@ -73,15 +70,12 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
-        # Copiar DESPUES del configure para que make lo tome
-        cp localoptions.h localoptions.h.bak
-        cat localoptions.h
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/arm64-v8a/libdropbear.so
-        echo "=== Strings problematicos ==="
-        strings output/arm64-v8a/libdropbear.so | grep -E "interrupts|getpass|data/tests" || echo "OK limpio"
+        echo "=== Strings problematicos ARM64 ==="
+        strings output/arm64-v8a/libdropbear.so | grep -E "/proc/interrupts|getpass|data/tests" || echo "OK limpio"
         make distclean
 
     - name: Compilar ARM32
@@ -101,13 +95,12 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
-        cat localoptions.h
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/armeabi-v7a/libdropbear.so
-        echo "=== Strings problematicos ==="
-        strings output/armeabi-v7a/libdropbear.so | grep -E "interrupts|getpass|data/tests" || echo "OK limpio"
+        echo "=== Strings problematicos ARM32 ==="
+        strings output/armeabi-v7a/libdropbear.so | grep -E "/proc/interrupts|getpass|data/tests" || echo "OK limpio"
         make distclean
 
     - name: Verificar binarios finales
