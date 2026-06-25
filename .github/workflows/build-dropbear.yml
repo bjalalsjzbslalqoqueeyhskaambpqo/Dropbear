@@ -27,6 +27,7 @@ jobs:
 
     - name: Aplicar parches para Android
       run: |
+        # Crear implementación de getpass() en src/
         cat << 'GETPASS_EOF' > src/netbsd_getpass.c
         #include <signal.h>
         #include <stdio.h>
@@ -41,10 +42,8 @@ jobs:
             int echo;
             static char buf[1024];
             sigset_t oset, nset;
-
             if ((outfp = fp = fopen("/dev/tty", "w+")) == NULL) {
-                outfp = stderr;
-                fp = stdin;
+                outfp = stderr; fp = stdin;
             }
             sigemptyset(&nset);
             sigaddset(&nset, SIGINT);
@@ -71,6 +70,10 @@ jobs:
         }
         GETPASS_EOF
 
+        # Agregar prototipo de getpass() en includes.h para que cli-auth.c lo vea
+        echo 'char *getpass(const char *prompt);' >> src/includes.h
+
+        # Parchear Makefile.in para incluir netbsd_getpass.o
         sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
@@ -88,7 +91,7 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
         EOF
-
+        
     - name: Compilar ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
