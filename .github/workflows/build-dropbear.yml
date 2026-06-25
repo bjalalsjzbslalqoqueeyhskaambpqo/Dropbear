@@ -73,12 +73,15 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
+        # Copiar DESPUES del configure para que make lo tome
+        cp localoptions.h localoptions.h.bak
+        cat localoptions.h
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/arm64-v8a/libdropbear.so
-        echo "=== Verificar strings problemáticos ARM64 ==="
-        strings output/arm64-v8a/libdropbear.so | grep -E "getpass|/data/tests|getpwuid" || echo "OK: limpio"
+        echo "=== Strings problematicos ==="
+        strings output/arm64-v8a/libdropbear.so | grep -E "interrupts|getpass|data/tests" || echo "OK limpio"
         make distclean
 
     - name: Compilar ARM32
@@ -98,12 +101,13 @@ jobs:
           --disable-utmp \
           --disable-wtmp \
           --disable-lastlog
+        cat localoptions.h
         make clean
         make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/armeabi-v7a/libdropbear.so
-        echo "=== Verificar strings problemáticos ARM32 ==="
-        strings output/armeabi-v7a/libdropbear.so | grep -E "getpass|/data/tests|getpwuid" || echo "OK: limpio"
+        echo "=== Strings problematicos ==="
+        strings output/armeabi-v7a/libdropbear.so | grep -E "interrupts|getpass|data/tests" || echo "OK limpio"
         make distclean
 
     - name: Verificar binarios finales
