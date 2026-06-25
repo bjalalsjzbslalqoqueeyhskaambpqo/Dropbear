@@ -27,12 +27,11 @@ jobs:
 
     - name: Aplicar parches para Android
       run: |
-        # 1. Agregar implementación propia de getpass() (NetBSD) 
-        #    porque Android no tiene getpass() en su libc
+        # Ver cómo está definido CLIOBJS en este version
+        grep -n "CLIOBJS\|cli-auth\|CLIOBJS+=" Makefile.in | head -20
+
+        # Crear netbsd_getpass.c
         cat << 'GETPASS_EOF' > netbsd_getpass.c
-        #include <assert.h>
-        #include <paths.h>
-        #include <pwd.h>
         #include <signal.h>
         #include <stdio.h>
         #include <termios.h>
@@ -76,14 +75,25 @@ jobs:
         }
         GETPASS_EOF
 
-        # 2. Registrar netbsd_getpass.o en el Makefile para que linkee
-        sed -i 's/^CLIOBJS=.*/& netbsd_getpass.o/' Makefile.in
+        # Intentar diferentes formas de parchear Makefile.in
+        echo "=== Contenido relevante de Makefile.in ==="
+        grep -n "CLIOBJS\|agentfwd\|authpasswd" Makefile.in | head -30
 
-        # Verificar
+        # Agregar netbsd_getpass.o después de cli-agentfwd.o
+        if grep -q "cli-agentfwd.o" Makefile.in; then
+            sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
+            echo "Parchado via cli-agentfwd.o"
+        elif grep -q "CLIOBJS" Makefile.in; then
+            sed -i '/CLIOBJS/a CLIOBJS+=netbsd_getpass.o' Makefile.in
+            echo "Parchado via CLIOBJS append"
+        else
+            echo "ERROR: No se pudo encontrar punto de inserción en Makefile.in"
+            cat Makefile.in | head -80
+            exit 1
+        fi
+
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
-        # 3. localoptions.h - sin deshabilitar SVR_PUBKEY_AUTH
-        #    porque sysoptions.h lo requiere aunque compilemos solo el cliente
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
