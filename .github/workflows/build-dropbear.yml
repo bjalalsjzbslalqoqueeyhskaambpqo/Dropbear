@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: 'mkj/dropbear'
-        ref: 'DROPBEAR_2026.91'
+        ref: 'DROPBEAR_2024.86'
         fetch-depth: 1
 
     - name: Setup NDK
@@ -27,58 +27,32 @@ jobs:
 
     - name: Aplicar parches para Android
       run: |
-        # Crear implementación de getpass() en src/
         cat << 'GETPASS_EOF' > src/netbsd_getpass.c
-        #include <signal.h>
         #include <stdio.h>
-        #include <termios.h>
+        #include <stdlib.h>
+        #include <string.h>
         #include <unistd.h>
 
         char *getpass(const char *prompt) {
-            struct termios term;
-            int ch;
-            char *p;
-            FILE *fp, *outfp;
-            int echo;
             static char buf[1024];
-            sigset_t oset, nset;
-            if ((outfp = fp = fopen("/dev/tty", "w+")) == NULL) {
-                outfp = stderr; fp = stdin;
+            const char *env = getenv("DROPBEAR_PASSWORD");
+            if (env) {
+                strncpy(buf, env, sizeof(buf) - 1);
+                buf[sizeof(buf) - 1] = '\0';
+                return buf;
             }
-            sigemptyset(&nset);
-            sigaddset(&nset, SIGINT);
-            sigaddset(&nset, SIGTSTP);
-            sigprocmask(SIG_BLOCK, &nset, &oset);
-            tcgetattr(fileno(fp), &term);
-            if ((echo = (term.c_lflag & ECHO)) != 0) {
-                term.c_lflag &= ~ECHO;
-                tcsetattr(fileno(fp), TCSAFLUSH, &term);
-            }
-            if (prompt) fputs(prompt, outfp);
-            rewind(outfp);
-            for (p = buf; (ch = getc(fp)) != EOF && ch != '\n';)
-                if (p < buf + sizeof(buf) - 1) *p++ = ch;
-            *p = '\0';
-            write(fileno(outfp), "\n", 1);
-            if (echo) {
-                term.c_lflag |= ECHO;
-                tcsetattr(fileno(fp), TCSAFLUSH, &term);
-            }
-            sigprocmask(SIG_SETMASK, &oset, NULL);
-            if (fp != stdin) fclose(fp);
+            buf[0] = '\0';
             return buf;
         }
         GETPASS_EOF
 
-        # Agregar prototipo de getpass() en includes.h para que cli-auth.c lo vea
         echo 'char *getpass(const char *prompt);' >> src/includes.h
-
-        # Parchear Makefile.in para incluir netbsd_getpass.o
         sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
         cat << 'EOF' > localoptions.h
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
+        #define DROPBEAR_CLI_PUBKEY_AUTH 1
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
@@ -91,7 +65,7 @@ jobs:
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
         EOF
-        
+
     - name: Compilar ARM64
       env:
         NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
@@ -110,7 +84,7 @@ jobs:
           --disable-wtmp \
           --disable-lastlog
         make clean
-        make MULTI=1 PROGRAMS="dbclient dropbearkey" -j$(nproc)
+        make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/arm64-v8a/libdropbear.so
         make distclean
@@ -133,7 +107,7 @@ jobs:
           --disable-wtmp \
           --disable-lastlog
         make clean
-        make MULTI=1 PROGRAMS="dbclient dropbearkey" -j$(nproc)
+        make MULTI=1 PROGRAMS="dbclient dropbearkey dropbearconvert" -j$(nproc)
         $STRIP dropbearmulti
         cp dropbearmulti output/armeabi-v7a/libdropbear.so
         make distclean
