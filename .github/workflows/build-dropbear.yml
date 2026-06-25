@@ -27,11 +27,7 @@ jobs:
 
     - name: Aplicar parches para Android
       run: |
-        # Ver cómo está definido CLIOBJS en este version
-        grep -n "CLIOBJS\|cli-auth\|CLIOBJS+=" Makefile.in | head -20
-
-        # Crear netbsd_getpass.c
-        cat << 'GETPASS_EOF' > netbsd_getpass.c
+        cat << 'GETPASS_EOF' > src/netbsd_getpass.c
         #include <signal.h>
         #include <stdio.h>
         #include <termios.h>
@@ -75,23 +71,7 @@ jobs:
         }
         GETPASS_EOF
 
-        # Intentar diferentes formas de parchear Makefile.in
-        echo "=== Contenido relevante de Makefile.in ==="
-        grep -n "CLIOBJS\|agentfwd\|authpasswd" Makefile.in | head -30
-
-        # Agregar netbsd_getpass.o después de cli-agentfwd.o
-        if grep -q "cli-agentfwd.o" Makefile.in; then
-            sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
-            echo "Parchado via cli-agentfwd.o"
-        elif grep -q "CLIOBJS" Makefile.in; then
-            sed -i '/CLIOBJS/a CLIOBJS+=netbsd_getpass.o' Makefile.in
-            echo "Parchado via CLIOBJS append"
-        else
-            echo "ERROR: No se pudo encontrar punto de inserción en Makefile.in"
-            cat Makefile.in | head -80
-            exit 1
-        fi
-
+        sed -i 's/cli-agentfwd\.o/cli-agentfwd.o netbsd_getpass.o/' Makefile.in
         grep "netbsd_getpass" Makefile.in || { echo "ERROR: Makefile no parchado"; exit 1; }
 
         cat << 'EOF' > localoptions.h
@@ -157,12 +137,8 @@ jobs:
 
     - name: Verificar
       run: |
-        echo "=== ARM64 ==="
-        file output/arm64-v8a/libdropbear.so
-        ls -lh output/arm64-v8a/libdropbear.so
-        echo "=== ARM32 ==="
-        file output/armeabi-v7a/libdropbear.so
-        ls -lh output/armeabi-v7a/libdropbear.so
+        echo "=== ARM64 ===" && file output/arm64-v8a/libdropbear.so && ls -lh output/arm64-v8a/libdropbear.so
+        echo "=== ARM32 ===" && file output/armeabi-v7a/libdropbear.so && ls -lh output/armeabi-v7a/libdropbear.so
 
     - name: Push binarios
       run: |
