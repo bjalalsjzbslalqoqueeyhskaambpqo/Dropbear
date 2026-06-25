@@ -25,20 +25,25 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Inyectar localoptions.h Android
+    - name: Parchear getpass y localoptions.h
       run: |
+        # Reemplazar getpass() por getenv() en cli-auth.c
+        sed -i 's/password = getpass(prompt)/password = getenv("DROPBEAR_PASSWORD")/' src/cli-auth.c
+
+        # Verificar que el parche se aplicó
+        grep -n "DROPBEAR_PASSWORD" src/cli-auth.c || { echo "ERROR: parche no aplicado"; exit 1; }
+
         cat << 'EOF' > localoptions.h
-        /* Cliente Android - solo dbclient */
+        /* Android client only */
         #define DROPBEAR_SVR_PASSWORD_AUTH 0
         #define DROPBEAR_CLI_PASSWORD_AUTH 1
         #define DROPBEAR_CLI_PUBKEY_AUTH 0
+        #define DROPBEAR_SVR_PUBKEY_AUTH 0
 
-        /* Rendimiento */
         #define DISABLE_SYSLOG 1
         #define DO_HOST_LOOKUP 0
         #define DROPBEAR_SMALL_CODE 1
 
-        /* Ciphers - solo lo necesario */
         #define DROPBEAR_3DES 0
         #define DROPBEAR_ENABLE_CBC_MODE 0
         #define DROPBEAR_SHA1_96_MAC 0
@@ -46,9 +51,6 @@ jobs:
         #define DROPBEAR_TWOFISH128 0
         #define DROPBEAR_TWOFISH256 0
         #define DROPBEAR_BLOWFISH 0
-
-        /* Forzar lectura de password desde entorno */
-        #define DROPBEAR_PASSWORD_ENV "DROPBEAR_PASSWORD"
         EOF
 
     - name: Compilar ARM64
@@ -104,7 +106,7 @@ jobs:
         file output/armeabi-v7a/libdropbear.so
         ls -lh output/armeabi-v7a/libdropbear.so
 
-    - name: Push a rama binarios-dropbear
+    - name: Push binarios
       run: |
         git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
         cd repo
